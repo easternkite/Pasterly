@@ -36,3 +36,8 @@ Pasterly is an Obsidian plugin that automatically uploads clipboard images to Fi
 - Internet connection is required for cloud upload
 - Only image files are supported
 - Works offline with default Obsidian paste behavior
+
+## Credits
+
+- Built using the [Obsidian Plugin Template](https://github.com/obsidianmd/obsidian-sample-plugin)
+- Uses [Firebase SDK](https://firebase.google.com/) under Apache License 2.0
