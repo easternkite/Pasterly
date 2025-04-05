@@ -1,4 +1,6 @@
 # Pasterly
+![ezgif-7de3789684cc39 (1)](https://github.com/user-attachments/assets/71703ea2-fe0e-4602-8fe0-13c32abda6a2)
+
 
 Pasterly is an Obsidian plugin that automatically uploads clipboard images to Firebase Storage and generates markdown links.
 
