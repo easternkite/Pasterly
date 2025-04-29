@@ -71,7 +71,7 @@ export default class Pasterly extends Plugin {
 	 */
 	async initializeFirebase() {
 		if (!this.settings.firebaseBucketUrl) {
-			new Notice('Please set your Firebase Storage Bucket URL in settings first');
+			new Notice('Please set your Firebase Storage bucket URL in settings first.');
 			return;
 		}
 		this.firebaseStorage = new FirebaseStorage(this.settings.firebaseBucketUrl);
@@ -101,7 +101,7 @@ export default class Pasterly extends Plugin {
 	handleImageUpload = async (file: File, editor: Editor) => {
 		const storage = this.firebaseStorage;
 		if (!storage) {
-			new Notice('Firebase Storage is not initialized. Please check your settings');
+			new Notice('Firebase Storage is not initialized. Please check your settings.');
 			return null;
 		}
 
@@ -154,6 +154,10 @@ export default class Pasterly extends Plugin {
 	}
 
 	onunload() {
+		if (this.initializeTimeout !== null) {
+			window.clearTimeout(this.initializeTimeout);
+			this.initializeTimeout = null;
+		}
 	}
 
 	/**
@@ -183,8 +187,6 @@ class PasterlySettingTab extends PluginSettingTab {
 	display(): void {
 		const {containerEl} = this;
 		containerEl.empty();
-
-		containerEl.createEl('h2', {text: 'Pasterly Settings'});
 
 		new Setting(containerEl)
 			.setName('Firebase Storage Bucket URL')
