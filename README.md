@@ -18,6 +18,8 @@ Pasterly is an Obsidian plugin that automatically uploads clipboard images to Fi
    - Create a project in Firebase Console
    - Enable Storage service
    - Get your bucket URL (e.g., `gs://your-bucket.appspot.com`)
+  
+> To allow uploading image from **Pasterly**, MUST ensure **WRITE** permission is enabled.
 
 2. Plugin Configuration:
    - Open Pasterly settings in Obsidian settings
