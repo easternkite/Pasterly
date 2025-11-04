@@ -7,10 +7,12 @@ import { FirebaseStorage } from './firebaseStorage';
  */
 interface PasterlySettings {
 	firebaseBucketUrl: string;
+	imageSize: number;
 }
 
 const DEFAULT_SETTINGS: PasterlySettings = {
-	firebaseBucketUrl: ''
+	firebaseBucketUrl: '',
+	imageSize: 0
 }
 
 /**
@@ -37,6 +39,21 @@ const replacePlaceholder = (editor: Editor, placeholder: string, cursor: { line:
 	const end = { line: cursor.line, ch: cursor.ch + placeholder.length };
 	editor.replaceRange(content, start, end);
 };
+
+/**
+ * Attaches an image to the editor
+ * @param imageUrl - The URL of the image to attach
+ * @param hasFixedSize - Whether the image has a fixed size
+ * @param size - The size of the image
+ * @returns The image tag to attach to the editor
+ */
+const attachImage = (imageUrl: string, hasFixedSize: boolean, size: number) => {
+	if (!hasFixedSize) {
+		return `![](${imageUrl})`
+	}
+
+	return `\n<img src="${imageUrl}" width="${size}"/>\n`;
+}
 
 /**
  * Higher-order function for handling asynchronous operations with error handling
@@ -110,7 +127,10 @@ export default class Pasterly extends Plugin {
 		const result = await withErrorHandling(
 			async () => {
 				const imageUrl = await storage.uploadImage(file);
-				replacePlaceholder(editor, placeholder, cursor, `![](${imageUrl})`);
+				const size = this.settings.imageSize;
+				const hasFixedSize = size > 1;
+				const imageTag = attachImage(imageUrl, hasFixedSize, size);
+				replacePlaceholder(editor, placeholder, cursor, imageTag);
 				new Notice('Image uploaded successfully');
 				return imageUrl;
 			},
@@ -178,6 +198,8 @@ export default class Pasterly extends Plugin {
 /**
  * Settings tab for the Pasterly plugin
  * Allows users to configure the Firebase Storage bucket URL
+ * 
+ * Includes a toggle to enable/disable fixed size and a text input for the image size
  */
 class PasterlySettingTab extends PluginSettingTab {
 	constructor(app: App, private plugin: Pasterly) {
@@ -199,5 +221,23 @@ class PasterlySettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 					this.plugin.debouncedInitializeFirebase();
 				}));
+	
+		new Setting(containerEl)
+			.setName('Fixed Size')
+			.setDesc('Size of the image to attach to the editor (0 for no fixed size)')
+			.addText(text => {
+				text
+					.setValue(this.plugin.settings.imageSize.toString())
+					.onChange(async (value) => {
+						const num = Number(value);
+						if (isNaN(num)) return;
+
+						this.plugin.settings.imageSize = num;
+						await this.plugin.saveSettings();
+					})
+					
+				text.inputEl.type = "number";
+			})
+	
 	}
 }
