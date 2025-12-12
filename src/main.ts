@@ -28,7 +28,7 @@ const attachImage = (imageUrl: string, hasFixedSize: boolean, size: number) => {
 	if (!hasFixedSize) {
 		return `![](${imageUrl})`
 	}
-	return `![|${size}](${imageUrl})`;
+	return `![${size}](${imageUrl})`;
 };
 
 /**
