@@ -1,24 +1,9 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
-import { FirebaseStorage } from './firebaseStorage';
-
-/**
- * Settings interface for the Pasterly plugin
- * Defines configuration options for Firebase integration
- */
-interface PasterlySettings {
-	firebaseBucketUrl: string;
-	imageSize: number;
-}
-
-const DEFAULT_SETTINGS: PasterlySettings = {
-	firebaseBucketUrl: '',
-	imageSize: 0
-}
+import { App, Editor, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { createStorageProvider } from './storageProviders';
+import { StorageProvider, PasterlySettings, DEFAULT_SETTINGS } from './types';
 
 /**
  * Creates a temporary placeholder in the editor while an image is being uploaded
- * @param editor - The Obsidian editor instance
- * @returns Object containing the placeholder text and cursor position
  */
 const createPlaceholder = (editor: Editor) => {
 	const placeholder = '![Uploading...]()';
@@ -28,11 +13,7 @@ const createPlaceholder = (editor: Editor) => {
 };
 
 /**
- * Replaces the temporary placeholder with the final content (uploaded image URL or empty string)
- * @param editor - The Obsidian editor instance
- * @param placeholder - The placeholder text to replace
- * @param cursor - The cursor position where the placeholder was inserted
- * @param content - The content to replace the placeholder with
+ * Replaces the temporary placeholder with the final content
  */
 const replacePlaceholder = (editor: Editor, placeholder: string, cursor: { line: number, ch: number }, content: string) => {
 	const start = { line: cursor.line, ch: cursor.ch };
@@ -42,24 +23,16 @@ const replacePlaceholder = (editor: Editor, placeholder: string, cursor: { line:
 
 /**
  * Attaches an image to the editor
- * @param imageUrl - The URL of the image to attach
- * @param hasFixedSize - Whether the image has a fixed size
- * @param size - The size of the image
- * @returns The image tag to attach to the editor
  */
 const attachImage = (imageUrl: string, hasFixedSize: boolean, size: number) => {
 	if (!hasFixedSize) {
 		return `![](${imageUrl})`
 	}
-
-	return `\n<img src="${imageUrl}" width="${size}"/>\n`;
-}
+	return `![${size}](${imageUrl})`;
+};
 
 /**
  * Higher-order function for handling asynchronous operations with error handling
- * @param fn - The async function to execute
- * @param onError - Callback function to handle errors
- * @returns Promise that resolves to the result or null if an error occurred
  */
 const withErrorHandling = async <T>(
 	fn: () => Promise<T>,
@@ -75,50 +48,68 @@ const withErrorHandling = async <T>(
 
 /**
  * Main plugin class for Pasterly
- * Handles image uploads from clipboard to Firebase Storage
+ * Handles image uploads from clipboard to Firebase Storage or Google Cloud Storage
  */
 export default class Pasterly extends Plugin {
 	settings: PasterlySettings;
-	private firebaseStorage: FirebaseStorage | null = null;
+	private storageProvider: StorageProvider | null = null;
 	private initializeTimeout: number | null = null;
 
 	/**
-	 * Initializes Firebase Storage with the configured bucket URL
-	 * Shows a notice if the bucket URL is not set
+	 * Initializes the storage provider based on settings
 	 */
-	async initializeFirebase() {
-		if (!this.settings.firebaseBucketUrl) {
-			new Notice('Please set your Firebase Storage bucket URL in settings first.');
-			return;
+	async initializeStorage() {
+		try {
+			if (this.settings.storageType === 'firebase') {
+				if (!this.settings.firebaseBucketUrl) {
+					new Notice('Please set your Firebase Storage bucket URL in settings first.');
+					return;
+				}
+			} else if (this.settings.storageType === 'gcs') {
+				if (!this.settings.gcsBucketName) {
+					new Notice('Please set your GCS bucket name in settings first.');
+					return;
+				}
+				// If not using gcloud CLI, require access token
+				if (!this.settings.gcsUseGcloudCli && !this.settings.gcsAccessToken) {
+					new Notice('Please set your GCS access token or enable gcloud CLI in settings.');
+					return;
+				}
+			}
+
+			this.storageProvider = createStorageProvider(this.settings.storageType, {
+				firebaseBucketUrl: this.settings.firebaseBucketUrl,
+				gcsBucketName: this.settings.gcsBucketName,
+				gcsAccessToken: this.settings.gcsAccessToken,
+				gcsCdnBaseUrl: this.settings.gcsCdnBaseUrl,
+				gcsUseGcloudCli: this.settings.gcsUseGcloudCli,
+			});
+		} catch (error) {
+			console.error('Failed to initialize storage provider:', error);
+			new Notice('Failed to initialize storage provider. Check settings.');
 		}
-		this.firebaseStorage = new FirebaseStorage(this.settings.firebaseBucketUrl);
 	}
 
 	/**
-	 * Debounced version of initializeFirebase to prevent rapid reinitializations
-	 * Waits 500ms before reinitializing Firebase Storage
+	 * Debounced version of initializeStorage to prevent rapid reinitializations
 	 */
-	public debouncedInitializeFirebase = () => {
+	public debouncedInitializeStorage = () => {
 		if (this.initializeTimeout) {
 			window.clearTimeout(this.initializeTimeout);
 		}
 		this.initializeTimeout = window.setTimeout(() => {
-			this.initializeFirebase();
+			this.initializeStorage();
 			this.initializeTimeout = null;
 		}, 500);
 	};
 
 	/**
 	 * Handles the image upload process
-	 * Creates a placeholder, uploads the image, and replaces the placeholder with the result
-	 * @param file - The image file to upload
-	 * @param editor - The Obsidian editor instance
-	 * @returns Promise that resolves to the uploaded image URL or null if upload failed
 	 */
 	handleImageUpload = async (file: File, editor: Editor) => {
-		const storage = this.firebaseStorage;
+		const storage = this.storageProvider;
 		if (!storage) {
-			new Notice('Firebase Storage is not initialized. Please check your settings.');
+			new Notice('Storage provider is not initialized. Please check your settings.');
 			return null;
 		}
 
@@ -136,7 +127,7 @@ export default class Pasterly extends Plugin {
 			},
 			(error) => {
 				replacePlaceholder(editor, placeholder, cursor, '');
-				new Notice(error.message || 'Failed to upload image. Please check your Firebase settings');
+				new Notice(error.message || 'Failed to upload image. Please check your storage settings');
 				console.error('Image upload error:', error);
 			}
 		);
@@ -144,13 +135,9 @@ export default class Pasterly extends Plugin {
 		return result;
 	};
 
-	/**
-	 * Plugin initialization
-	 * Loads settings and sets up clipboard event listener for image uploads
-	 */
 	async onload() {
 		await this.loadSettings();
-		await this.initializeFirebase();
+		await this.initializeStorage();
 
 		this.registerEvent(
 			this.app.workspace.on('editor-paste', async (evt: ClipboardEvent, editor: Editor) => {
@@ -180,16 +167,10 @@ export default class Pasterly extends Plugin {
 		}
 	}
 
-	/**
-	 * Loads plugin settings from storage
-	 */
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 	}
 
-	/**
-	 * Saves plugin settings to storage
-	 */
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
@@ -197,9 +178,6 @@ export default class Pasterly extends Plugin {
 
 /**
  * Settings tab for the Pasterly plugin
- * Allows users to configure the Firebase Storage bucket URL
- * 
- * Includes a toggle to enable/disable fixed size and a text input for the image size
  */
 class PasterlySettingTab extends PluginSettingTab {
 	constructor(app: App, private plugin: Pasterly) {
@@ -207,21 +185,106 @@ class PasterlySettingTab extends PluginSettingTab {
 	}
 
 	display(): void {
-		const {containerEl} = this;
+		const { containerEl } = this;
 		containerEl.empty();
 
+		// Storage Type Selection
 		new Setting(containerEl)
-			.setName('Firebase Storage Bucket URL')
-			.setDesc('URL of your Firebase Storage bucket (e.g., gs://your-bucket.appspot.com)')
-			.addText(text => text
-				.setPlaceholder('gs://your-bucket.appspot.com')
-				.setValue(this.plugin.settings.firebaseBucketUrl)
-				.onChange(async (value) => {
-					this.plugin.settings.firebaseBucketUrl = value;
+			.setName('Storage Provider')
+			.setDesc('Choose your storage backend')
+			.addDropdown(dropdown => dropdown
+				.addOption('firebase', 'Firebase Storage')
+				.addOption('gcs', 'Google Cloud Storage')
+				.setValue(this.plugin.settings.storageType)
+				.onChange(async (value: 'firebase' | 'gcs') => {
+					this.plugin.settings.storageType = value;
 					await this.plugin.saveSettings();
-					this.plugin.debouncedInitializeFirebase();
+					this.plugin.debouncedInitializeStorage();
+					this.display(); // Refresh to show/hide relevant settings
 				}));
-	
+
+		// Firebase Settings
+		if (this.plugin.settings.storageType === 'firebase') {
+			new Setting(containerEl)
+				.setName('Firebase Storage Bucket URL')
+				.setDesc('URL of your Firebase Storage bucket (e.g., gs://your-bucket.appspot.com)')
+				.addText(text => text
+					.setPlaceholder('gs://your-bucket.appspot.com')
+					.setValue(this.plugin.settings.firebaseBucketUrl)
+					.onChange(async (value) => {
+						this.plugin.settings.firebaseBucketUrl = value;
+						await this.plugin.saveSettings();
+						this.plugin.debouncedInitializeStorage();
+					}));
+		}
+
+		// GCS Settings
+		if (this.plugin.settings.storageType === 'gcs') {
+			new Setting(containerEl)
+				.setName('GCS Bucket Name')
+				.setDesc('Name of your Google Cloud Storage bucket (without gs:// prefix)')
+				.addText(text => text
+					.setPlaceholder('my-bucket-name')
+					.setValue(this.plugin.settings.gcsBucketName)
+					.onChange(async (value) => {
+						this.plugin.settings.gcsBucketName = value;
+						await this.plugin.saveSettings();
+						this.plugin.debouncedInitializeStorage();
+					}));
+
+			new Setting(containerEl)
+				.setName('Use gcloud CLI for authentication')
+				.setDesc('Automatically get access token by running "gcloud auth print-access-token". Requires gcloud CLI installed and authenticated.')
+				.addToggle(toggle => toggle
+					.setValue(this.plugin.settings.gcsUseGcloudCli)
+					.onChange(async (value) => {
+						this.plugin.settings.gcsUseGcloudCli = value;
+						await this.plugin.saveSettings();
+						this.plugin.debouncedInitializeStorage();
+						this.display(); // Refresh to show/hide token field
+					}));
+
+			// Only show manual token input if gcloud CLI is disabled
+			if (!this.plugin.settings.gcsUseGcloudCli) {
+				new Setting(containerEl)
+					.setName('GCS Access Token')
+					.setDesc('OAuth2 access token (get via: gcloud auth print-access-token). Token expires after ~1 hour.')
+					.addTextArea(text => {
+						text
+							.setPlaceholder('ya29.a0...')
+							.setValue(this.plugin.settings.gcsAccessToken)
+							.onChange(async (value) => {
+								this.plugin.settings.gcsAccessToken = value;
+								await this.plugin.saveSettings();
+								this.plugin.debouncedInitializeStorage();
+							});
+						text.inputEl.rows = 3;
+						text.inputEl.style.width = '100%';
+					});
+
+				// Info notice about token expiration
+				const infoEl = containerEl.createEl('div', {
+					cls: 'setting-item-description',
+					text: '⚠️ Access tokens expire after ~1 hour. You will need to refresh the token periodically.'
+				});
+				infoEl.style.marginBottom = '1em';
+				infoEl.style.color = 'var(--text-warning)';
+			}
+
+			new Setting(containerEl)
+				.setName('CDN Base URL')
+				.setDesc('Optional: CDN URL to use instead of storage.googleapis.com (e.g., https://cdn.example.com)')
+				.addText(text => text
+					.setPlaceholder('https://cdn.example.com')
+					.setValue(this.plugin.settings.gcsCdnBaseUrl)
+					.onChange(async (value) => {
+						this.plugin.settings.gcsCdnBaseUrl = value;
+						await this.plugin.saveSettings();
+						this.plugin.debouncedInitializeStorage();
+					}));
+		}
+
+		// Common Settings
 		new Setting(containerEl)
 			.setName('Fixed Size')
 			.setDesc('Size of the image to attach to the editor (0 for no fixed size)')
@@ -231,13 +294,10 @@ class PasterlySettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						const num = Number(value);
 						if (isNaN(num)) return;
-
 						this.plugin.settings.imageSize = num;
 						await this.plugin.saveSettings();
-					})
-					
+					});
 				text.inputEl.type = "number";
-			})
-	
+			});
 	}
 }
