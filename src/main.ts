@@ -88,6 +88,19 @@ export default class Pasterly extends Plugin {
 					new Notice('Please set your GCS access token or enable gcloud CLI in settings.');
 					return;
 				}
+			} else if (this.settings.storageType === 's3') {
+				if (!this.settings.s3BucketName) {
+					new Notice('Please set your S3 bucket name in settings first.');
+					return;
+				}
+				if (!this.settings.s3Region) {
+					new Notice('Please set your S3 region in settings first.');
+					return;
+				}
+				if (!this.settings.s3AccessKeyId || !this.settings.s3SecretAccessKey) {
+					new Notice('Please set your S3 credentials in settings first.');
+					return;
+				}
 			}
 
 			this.storageProvider = createStorageProvider(this.settings.storageType, {
@@ -96,6 +109,14 @@ export default class Pasterly extends Plugin {
 				gcsAccessToken: this.settings.gcsAccessToken,
 				gcsCdnBaseUrl: this.settings.gcsCdnBaseUrl,
 				gcsUseGcloudCli: this.settings.gcsUseGcloudCli,
+				s3BucketName: this.settings.s3BucketName,
+				s3Region: this.settings.s3Region,
+				s3Endpoint: this.settings.s3Endpoint,
+				s3AccessKeyId: this.settings.s3AccessKeyId,
+				s3SecretAccessKey: this.settings.s3SecretAccessKey,
+				s3SessionToken: this.settings.s3SessionToken,
+				s3PublicBaseUrl: this.settings.s3PublicBaseUrl,
+				s3ForcePathStyle: this.settings.s3ForcePathStyle,
 			});
 		} catch (error) {
 			console.error('Failed to initialize storage provider:', error);
@@ -183,8 +204,16 @@ export default class Pasterly extends Plugin {
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 		const normalizedCdnBaseUrl = normalizeOptionalBaseUrl(this.settings.gcsCdnBaseUrl);
-		if (normalizedCdnBaseUrl !== this.settings.gcsCdnBaseUrl) {
+		const normalizedS3Endpoint = normalizeOptionalBaseUrl(this.settings.s3Endpoint);
+		const normalizedS3PublicBaseUrl = normalizeOptionalBaseUrl(this.settings.s3PublicBaseUrl);
+		if (
+			normalizedCdnBaseUrl !== this.settings.gcsCdnBaseUrl ||
+			normalizedS3Endpoint !== this.settings.s3Endpoint ||
+			normalizedS3PublicBaseUrl !== this.settings.s3PublicBaseUrl
+		) {
 			this.settings.gcsCdnBaseUrl = normalizedCdnBaseUrl;
+			this.settings.s3Endpoint = normalizedS3Endpoint;
+			this.settings.s3PublicBaseUrl = normalizedS3PublicBaseUrl;
 			await this.saveSettings();
 		}
 	}
@@ -213,8 +242,9 @@ class PasterlySettingTab extends PluginSettingTab {
 			.addDropdown(dropdown => dropdown
 				.addOption('firebase', 'Firebase Storage')
 				.addOption('gcs', 'Google Cloud Storage')
+				.addOption('s3', 'S3-compatible Storage (AWS S3 / R2)')
 				.setValue(this.plugin.settings.storageType)
-				.onChange(async (value: 'firebase' | 'gcs') => {
+				.onChange(async (value: 'firebase' | 'gcs' | 's3') => {
 					this.plugin.settings.storageType = value;
 					await this.plugin.saveSettings();
 					this.plugin.debouncedInitializeStorage();
@@ -297,6 +327,110 @@ class PasterlySettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.gcsCdnBaseUrl)
 					.onChange(async (value) => {
 						this.plugin.settings.gcsCdnBaseUrl = normalizeOptionalBaseUrl(value);
+						await this.plugin.saveSettings();
+						this.plugin.debouncedInitializeStorage();
+					}));
+		}
+
+		if (this.plugin.settings.storageType === 's3') {
+			new Setting(containerEl)
+				.setName('S3 Bucket Name')
+				.setDesc('Bucket name used to store uploaded images')
+				.addText(text => text
+					.setPlaceholder('my-bucket-name')
+					.setValue(this.plugin.settings.s3BucketName)
+					.onChange(async (value) => {
+						this.plugin.settings.s3BucketName = value.trim();
+						await this.plugin.saveSettings();
+						this.plugin.debouncedInitializeStorage();
+					}));
+
+			new Setting(containerEl)
+				.setName('S3 Region')
+				.setDesc('AWS region or provider-specific region (for R2 use "auto")')
+				.addText(text => text
+					.setPlaceholder('us-east-1')
+					.setValue(this.plugin.settings.s3Region)
+					.onChange(async (value) => {
+						this.plugin.settings.s3Region = value.trim();
+						await this.plugin.saveSettings();
+						this.plugin.debouncedInitializeStorage();
+					}));
+
+			new Setting(containerEl)
+				.setName('S3 Endpoint')
+				.setDesc('Optional for AWS S3. Required for S3-compatible providers such as Cloudflare R2 or MinIO.')
+				.addText(text => text
+					.setPlaceholder('https://<accountid>.r2.cloudflarestorage.com')
+					.setValue(this.plugin.settings.s3Endpoint)
+					.onChange(async (value) => {
+						this.plugin.settings.s3Endpoint = normalizeOptionalBaseUrl(value);
+						await this.plugin.saveSettings();
+						this.plugin.debouncedInitializeStorage();
+					}));
+
+			new Setting(containerEl)
+				.setName('Access Key ID')
+				.setDesc('Access key with write permission to the target bucket')
+				.addText(text => text
+					.setPlaceholder('AKIA...')
+					.setValue(this.plugin.settings.s3AccessKeyId)
+					.onChange(async (value) => {
+						this.plugin.settings.s3AccessKeyId = value.trim();
+						await this.plugin.saveSettings();
+						this.plugin.debouncedInitializeStorage();
+					}));
+
+			new Setting(containerEl)
+				.setName('Secret Access Key')
+				.setDesc('Secret key stored locally in the Obsidian plugin settings')
+				.addText(text => {
+					text
+						.setPlaceholder('••••••••')
+						.setValue(this.plugin.settings.s3SecretAccessKey)
+						.onChange(async (value) => {
+							this.plugin.settings.s3SecretAccessKey = value.trim();
+							await this.plugin.saveSettings();
+							this.plugin.debouncedInitializeStorage();
+						});
+					text.inputEl.type = 'password';
+				});
+
+			new Setting(containerEl)
+				.setName('Session Token')
+				.setDesc('Optional temporary session token for STS-style credentials')
+				.addTextArea(text => {
+					text
+						.setPlaceholder('IQoJb3JpZ2luX2Vj...')
+						.setValue(this.plugin.settings.s3SessionToken)
+						.onChange(async (value) => {
+							this.plugin.settings.s3SessionToken = value.trim();
+							await this.plugin.saveSettings();
+							this.plugin.debouncedInitializeStorage();
+						});
+					text.inputEl.rows = 2;
+					text.inputEl.style.width = '100%';
+				});
+
+			new Setting(containerEl)
+				.setName('Public Base URL')
+				.setDesc('Optional public URL used in markdown output. Recommended for R2 or CDN-backed buckets.')
+				.addText(text => text
+					.setPlaceholder('https://cdn.example.com')
+					.setValue(this.plugin.settings.s3PublicBaseUrl)
+					.onChange(async (value) => {
+						this.plugin.settings.s3PublicBaseUrl = normalizeOptionalBaseUrl(value);
+						await this.plugin.saveSettings();
+						this.plugin.debouncedInitializeStorage();
+					}));
+
+			new Setting(containerEl)
+				.setName('Use path-style URLs')
+				.setDesc('Enable for providers requiring endpoint/bucket paths instead of bucket-prefixed hostnames')
+				.addToggle(toggle => toggle
+					.setValue(this.plugin.settings.s3ForcePathStyle)
+					.onChange(async (value) => {
+						this.plugin.settings.s3ForcePathStyle = value;
 						await this.plugin.saveSettings();
 						this.plugin.debouncedInitializeStorage();
 					}));

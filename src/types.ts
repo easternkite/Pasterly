@@ -14,7 +14,7 @@ export interface StorageProvider {
 /**
  * Storage type enumeration
  */
-export type StorageType = 'firebase' | 'gcs';
+export type StorageType = 'firebase' | 'gcs' | 's3';
 
 /**
  * Settings interface for the Pasterly plugin
@@ -33,6 +33,16 @@ export interface PasterlySettings {
     gcsBucketName: string;
     gcsCdnBaseUrl: string;      // CDN base URL (e.g., https://cdn.example.com)
     gcsUseGcloudCli: boolean;   // Use gcloud CLI for auto-auth
+
+    // S3-compatible settings
+    s3BucketName: string;
+    s3Region: string;
+    s3Endpoint: string;
+    s3AccessKeyId: string;
+    s3SecretAccessKey: string;
+    s3SessionToken: string;
+    s3PublicBaseUrl: string;
+    s3ForcePathStyle: boolean;
 }
 
 export const DEFAULT_SETTINGS: PasterlySettings = {
@@ -42,5 +52,13 @@ export const DEFAULT_SETTINGS: PasterlySettings = {
     gcsAccessToken: '',
     gcsBucketName: '',
     gcsCdnBaseUrl: '',
-    gcsUseGcloudCli: true
+    gcsUseGcloudCli: true,
+    s3BucketName: '',
+    s3Region: 'us-east-1',
+    s3Endpoint: '',
+    s3AccessKeyId: '',
+    s3SecretAccessKey: '',
+    s3SessionToken: '',
+    s3PublicBaseUrl: '',
+    s3ForcePathStyle: false,
 };
