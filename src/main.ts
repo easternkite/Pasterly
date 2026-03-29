@@ -2,6 +2,19 @@ import { App, Editor, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian
 import { createStorageProvider } from './storageProviders';
 import { StorageProvider, PasterlySettings, DEFAULT_SETTINGS } from './types';
 
+const normalizeOptionalBaseUrl = (value: string): string => {
+	if (!value.trim()) {
+		return '';
+	}
+
+	const trimmedValue = value.trim();
+	const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmedValue)
+		? trimmedValue
+		: `https://${trimmedValue.replace(/^\/+/, '')}`;
+
+	return withProtocol.replace(/\/+$/, '');
+};
+
 /**
  * Creates a temporary placeholder in the editor while an image is being uploaded
  */
@@ -169,6 +182,11 @@ export default class Pasterly extends Plugin {
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const normalizedCdnBaseUrl = normalizeOptionalBaseUrl(this.settings.gcsCdnBaseUrl);
+		if (normalizedCdnBaseUrl !== this.settings.gcsCdnBaseUrl) {
+			this.settings.gcsCdnBaseUrl = normalizedCdnBaseUrl;
+			await this.saveSettings();
+		}
 	}
 
 	async saveSettings() {
@@ -278,7 +296,7 @@ class PasterlySettingTab extends PluginSettingTab {
 					.setPlaceholder('https://cdn.example.com')
 					.setValue(this.plugin.settings.gcsCdnBaseUrl)
 					.onChange(async (value) => {
-						this.plugin.settings.gcsCdnBaseUrl = value;
+						this.plugin.settings.gcsCdnBaseUrl = normalizeOptionalBaseUrl(value);
 						await this.plugin.saveSettings();
 						this.plugin.debouncedInitializeStorage();
 					}));

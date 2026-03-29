@@ -3,6 +3,23 @@ import { getStorage, ref, uploadBytes, getDownloadURL, FirebaseStorage as FBStor
 import { requestUrl } from 'obsidian';
 import { StorageProvider } from './types';
 
+const normalizeOptionalBaseUrl = (value: string | null): string | null => {
+    if (!value) {
+        return null;
+    }
+
+    const trimmedValue = value.trim();
+    if (!trimmedValue) {
+        return null;
+    }
+
+    const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmedValue)
+        ? trimmedValue
+        : `https://${trimmedValue.replace(/^\/+/, '')}`;
+
+    return withProtocol.replace(/\/+$/, '');
+};
+
 /**
  * Firebase Storage Provider
  * Handles file uploads to Firebase Storage with a specified bucket
@@ -106,7 +123,7 @@ export class GCSStorageProvider implements StorageProvider {
     constructor(bucketName: string, accessToken: string | null, cdnBaseUrl: string | null = null, useGcloudCli: boolean = false) {
         this.bucketName = bucketName;
         this.accessToken = accessToken;
-        this.cdnBaseUrl = cdnBaseUrl;
+        this.cdnBaseUrl = normalizeOptionalBaseUrl(cdnBaseUrl);
         this.useGcloudCli = useGcloudCli;
     }
 
@@ -166,8 +183,7 @@ export class GCSStorageProvider implements StorageProvider {
             if (response.status >= 200 && response.status < 300) {
                 // Return CDN URL if configured, otherwise GCS public URL
                 if (this.cdnBaseUrl) {
-                    const cdnUrl = this.cdnBaseUrl.replace(/\/$/, ''); // Remove trailing slash
-                    return `${cdnUrl}/${objectPath}`;
+                    return `${this.cdnBaseUrl}/${objectPath}`;
                 }
                 return `https://storage.googleapis.com/${this.bucketName}/${objectPath}`;
             } else {
