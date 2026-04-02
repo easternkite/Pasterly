@@ -1,5 +1,6 @@
 import { initializeApp, getApp, FirebaseApp } from 'firebase/app';
 import { getStorage, ref, uploadBytes, getDownloadURL, FirebaseStorage as FBStorage } from "firebase/storage";
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { requestUrl } from 'obsidian';
 import { StorageProvider } from './types';
 
@@ -197,16 +198,125 @@ export class GCSStorageProvider implements StorageProvider {
 }
 
 /**
+ * S3-compatible Storage Provider
+ * Supports AWS S3 and providers exposing an S3-compatible API such as Cloudflare R2.
+ */
+export class S3CompatibleStorageProvider implements StorageProvider {
+    private readonly bucketName: string;
+    private readonly region: string;
+    private readonly endpoint: string | null;
+    private readonly publicBaseUrl: string | null;
+    private readonly forcePathStyle: boolean;
+    private readonly client: S3Client;
+
+    constructor(config: {
+        bucketName: string;
+        region: string;
+        endpoint?: string | null;
+        accessKeyId: string;
+        secretAccessKey: string;
+        sessionToken?: string | null;
+        publicBaseUrl?: string | null;
+        forcePathStyle?: boolean;
+    }) {
+        this.bucketName = config.bucketName;
+        this.region = config.region;
+        this.endpoint = normalizeOptionalBaseUrl(config.endpoint || null);
+        this.publicBaseUrl = normalizeOptionalBaseUrl(config.publicBaseUrl || null);
+        this.forcePathStyle = config.forcePathStyle || false;
+        this.client = new S3Client({
+            region: config.region,
+            endpoint: this.endpoint || undefined,
+            forcePathStyle: this.forcePathStyle,
+            credentials: {
+                accessKeyId: config.accessKeyId,
+                secretAccessKey: config.secretAccessKey,
+                sessionToken: config.sessionToken || undefined,
+            },
+        });
+    }
+
+    private generateUniqueFileName(originalName: string): string {
+        const timestamp = new Date().getTime();
+        const randomString = Math.random().toString(36).substring(2, 8);
+        const extension = originalName.split('.').pop() || 'png';
+        return `image_${timestamp}_${randomString}.${extension}`;
+    }
+
+    private async fileToArrayBuffer(file: File): Promise<ArrayBuffer> {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as ArrayBuffer);
+            reader.onerror = () => reject(new Error('Failed to read file'));
+            reader.readAsArrayBuffer(file);
+        });
+    }
+
+    private buildPublicUrl(objectPath: string): string {
+        if (this.publicBaseUrl) {
+            return `${this.publicBaseUrl}/${objectPath}`;
+        }
+
+        if (this.endpoint) {
+            const endpointUrl = new URL(this.endpoint);
+            const cleanPathname = endpointUrl.pathname.replace(/\/+$/, '');
+            endpointUrl.pathname = cleanPathname ? `${cleanPathname}/${objectPath}` : `/${objectPath}`;
+
+            if (this.forcePathStyle) {
+                endpointUrl.pathname = cleanPathname
+                    ? `${cleanPathname}/${this.bucketName}/${objectPath}`
+                    : `/${this.bucketName}/${objectPath}`;
+                return endpointUrl.toString();
+            }
+
+            endpointUrl.hostname = `${this.bucketName}.${endpointUrl.hostname}`;
+            return endpointUrl.toString();
+        }
+
+        return `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${objectPath}`;
+    }
+
+    public async uploadImage(file: File): Promise<string> {
+        const fileName = this.generateUniqueFileName(file.name);
+        const objectPath = `pasterly/${fileName}`;
+
+        try {
+            const arrayBuffer = await this.fileToArrayBuffer(file);
+
+            await this.client.send(new PutObjectCommand({
+                Bucket: this.bucketName,
+                Key: objectPath,
+                Body: new Uint8Array(arrayBuffer),
+                ContentType: file.type || 'image/png',
+            }));
+
+            return this.buildPublicUrl(objectPath);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            throw new Error(`Failed to upload to S3-compatible storage: ${message}. Check your credentials, endpoint, and bucket permissions.`);
+        }
+    }
+}
+
+/**
  * Factory function to create the appropriate storage provider
  */
 export function createStorageProvider(
-    type: 'firebase' | 'gcs',
+    type: 'firebase' | 'gcs' | 's3',
     config: {
         firebaseBucketUrl?: string;
         gcsBucketName?: string;
         gcsAccessToken?: string;
         gcsCdnBaseUrl?: string;
         gcsUseGcloudCli?: boolean;
+        s3BucketName?: string;
+        s3Region?: string;
+        s3Endpoint?: string;
+        s3AccessKeyId?: string;
+        s3SecretAccessKey?: string;
+        s3SessionToken?: string;
+        s3PublicBaseUrl?: string;
+        s3ForcePathStyle?: boolean;
     }
 ): StorageProvider {
     switch (type) {
@@ -230,6 +340,27 @@ export function createStorageProvider(
                 config.gcsCdnBaseUrl || null,
                 config.gcsUseGcloudCli || false
             );
+
+        case 's3':
+            if (!config.s3BucketName) {
+                throw new Error('S3 bucket name is required');
+            }
+            if (!config.s3Region) {
+                throw new Error('S3 region is required');
+            }
+            if (!config.s3AccessKeyId || !config.s3SecretAccessKey) {
+                throw new Error('S3 access key ID and secret access key are required');
+            }
+            return new S3CompatibleStorageProvider({
+                bucketName: config.s3BucketName,
+                region: config.s3Region,
+                endpoint: config.s3Endpoint || null,
+                accessKeyId: config.s3AccessKeyId,
+                secretAccessKey: config.s3SecretAccessKey,
+                sessionToken: config.s3SessionToken || null,
+                publicBaseUrl: config.s3PublicBaseUrl || null,
+                forcePathStyle: config.s3ForcePathStyle || false,
+            });
 
         default:
             throw new Error(`Unknown storage type: ${type}`);
