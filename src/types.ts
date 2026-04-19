@@ -14,7 +14,7 @@ export interface StorageProvider {
 /**
  * Storage type enumeration
  */
-export type StorageType = 'firebase' | 'gcs' | 's3';
+export type StorageType = 'firebase' | 'gcs' | 's3' | 'r2';
 
 /**
  * Settings interface for the Pasterly plugin
@@ -43,6 +43,13 @@ export interface PasterlySettings {
     s3SessionToken: string;
     s3PublicBaseUrl: string;
     s3ForcePathStyle: boolean;
+
+    // Cloudflare R2 settings
+    r2AccountId: string;
+    r2BucketName: string;
+    r2AccessKeyId: string;
+    r2SecretAccessKey: string;
+    r2PublicBaseUrl: string;
 }
 
 export const DEFAULT_SETTINGS: PasterlySettings = {
@@ -61,4 +68,9 @@ export const DEFAULT_SETTINGS: PasterlySettings = {
     s3SessionToken: '',
     s3PublicBaseUrl: '',
     s3ForcePathStyle: false,
+    r2AccountId: '',
+    r2BucketName: '',
+    r2AccessKeyId: '',
+    r2SecretAccessKey: '',
+    r2PublicBaseUrl: '',
 };
