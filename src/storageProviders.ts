@@ -302,7 +302,7 @@ export class S3CompatibleStorageProvider implements StorageProvider {
  * Factory function to create the appropriate storage provider
  */
 export function createStorageProvider(
-    type: 'firebase' | 'gcs' | 's3',
+    type: 'firebase' | 'gcs' | 's3' | 'r2',
     config: {
         firebaseBucketUrl?: string;
         gcsBucketName?: string;
@@ -317,6 +317,11 @@ export function createStorageProvider(
         s3SessionToken?: string;
         s3PublicBaseUrl?: string;
         s3ForcePathStyle?: boolean;
+        r2AccountId?: string;
+        r2BucketName?: string;
+        r2AccessKeyId?: string;
+        r2SecretAccessKey?: string;
+        r2PublicBaseUrl?: string;
     }
 ): StorageProvider {
     switch (type) {
@@ -360,6 +365,25 @@ export function createStorageProvider(
                 sessionToken: config.s3SessionToken || null,
                 publicBaseUrl: config.s3PublicBaseUrl || null,
                 forcePathStyle: config.s3ForcePathStyle || false,
+            });
+
+        case 'r2':
+            if (!config.r2AccountId) {
+                throw new Error('R2 account ID is required');
+            }
+            if (!config.r2BucketName) {
+                throw new Error('R2 bucket name is required');
+            }
+            if (!config.r2AccessKeyId || !config.r2SecretAccessKey) {
+                throw new Error('R2 access key ID and secret access key are required');
+            }
+            return new S3CompatibleStorageProvider({
+                bucketName: config.r2BucketName,
+                region: 'auto',
+                endpoint: `https://${config.r2AccountId}.r2.cloudflarestorage.com`,
+                accessKeyId: config.r2AccessKeyId,
+                secretAccessKey: config.r2SecretAccessKey,
+                publicBaseUrl: config.r2PublicBaseUrl || null,
             });
 
         default:

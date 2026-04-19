@@ -101,6 +101,19 @@ export default class Pasterly extends Plugin {
 					new Notice('Please set your S3 credentials in settings first.');
 					return;
 				}
+			} else if (this.settings.storageType === 'r2') {
+				if (!this.settings.r2AccountId) {
+					new Notice('Please set your R2 Account ID in settings first.');
+					return;
+				}
+				if (!this.settings.r2BucketName) {
+					new Notice('Please set your R2 Bucket Name in settings first.');
+					return;
+				}
+				if (!this.settings.r2AccessKeyId || !this.settings.r2SecretAccessKey) {
+					new Notice('Please set your R2 credentials in settings first.');
+					return;
+				}
 			}
 
 			this.storageProvider = createStorageProvider(this.settings.storageType, {
@@ -117,6 +130,11 @@ export default class Pasterly extends Plugin {
 				s3SessionToken: this.settings.s3SessionToken,
 				s3PublicBaseUrl: this.settings.s3PublicBaseUrl,
 				s3ForcePathStyle: this.settings.s3ForcePathStyle,
+				r2AccountId: this.settings.r2AccountId,
+				r2BucketName: this.settings.r2BucketName,
+				r2AccessKeyId: this.settings.r2AccessKeyId,
+				r2SecretAccessKey: this.settings.r2SecretAccessKey,
+				r2PublicBaseUrl: this.settings.r2PublicBaseUrl,
 			});
 		} catch (error) {
 			console.error('Failed to initialize storage provider:', error);
@@ -206,14 +224,18 @@ export default class Pasterly extends Plugin {
 		const normalizedCdnBaseUrl = normalizeOptionalBaseUrl(this.settings.gcsCdnBaseUrl);
 		const normalizedS3Endpoint = normalizeOptionalBaseUrl(this.settings.s3Endpoint);
 		const normalizedS3PublicBaseUrl = normalizeOptionalBaseUrl(this.settings.s3PublicBaseUrl);
+		const normalizedR2PublicBaseUrl = normalizeOptionalBaseUrl(this.settings.r2PublicBaseUrl);
+
 		if (
 			normalizedCdnBaseUrl !== this.settings.gcsCdnBaseUrl ||
 			normalizedS3Endpoint !== this.settings.s3Endpoint ||
-			normalizedS3PublicBaseUrl !== this.settings.s3PublicBaseUrl
+			normalizedS3PublicBaseUrl !== this.settings.s3PublicBaseUrl ||
+			normalizedR2PublicBaseUrl !== this.settings.r2PublicBaseUrl
 		) {
 			this.settings.gcsCdnBaseUrl = normalizedCdnBaseUrl;
 			this.settings.s3Endpoint = normalizedS3Endpoint;
 			this.settings.s3PublicBaseUrl = normalizedS3PublicBaseUrl;
+			this.settings.r2PublicBaseUrl = normalizedR2PublicBaseUrl;
 			await this.saveSettings();
 		}
 	}
@@ -242,9 +264,10 @@ class PasterlySettingTab extends PluginSettingTab {
 			.addDropdown(dropdown => dropdown
 				.addOption('firebase', 'Firebase Storage')
 				.addOption('gcs', 'Google Cloud Storage')
-				.addOption('s3', 'S3-compatible Storage (AWS S3 / R2)')
+				.addOption('s3', 'S3-compatible Storage (AWS S3 / MinIO)')
+				.addOption('r2', 'Cloudflare R2')
 				.setValue(this.plugin.settings.storageType)
-				.onChange(async (value: 'firebase' | 'gcs' | 's3') => {
+				.onChange(async (value: 'firebase' | 'gcs' | 's3' | 'r2') => {
 					this.plugin.settings.storageType = value;
 					await this.plugin.saveSettings();
 					this.plugin.debouncedInitializeStorage();
@@ -431,6 +454,71 @@ class PasterlySettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.s3ForcePathStyle)
 					.onChange(async (value) => {
 						this.plugin.settings.s3ForcePathStyle = value;
+						await this.plugin.saveSettings();
+						this.plugin.debouncedInitializeStorage();
+					}));
+		}
+
+		if (this.plugin.settings.storageType === 'r2') {
+			new Setting(containerEl)
+				.setName('R2 Account ID')
+				.setDesc('Cloudflare Account ID (found in R2 dashboard)')
+				.addText(text => text
+					.setPlaceholder('your-account-id')
+					.setValue(this.plugin.settings.r2AccountId)
+					.onChange(async (value) => {
+						this.plugin.settings.r2AccountId = value.trim();
+						await this.plugin.saveSettings();
+						this.plugin.debouncedInitializeStorage();
+					}));
+
+			new Setting(containerEl)
+				.setName('R2 Bucket Name')
+				.setDesc('Name of your R2 bucket')
+				.addText(text => text
+					.setPlaceholder('my-bucket-name')
+					.setValue(this.plugin.settings.r2BucketName)
+					.onChange(async (value) => {
+						this.plugin.settings.r2BucketName = value.trim();
+						await this.plugin.saveSettings();
+						this.plugin.debouncedInitializeStorage();
+					}));
+
+			new Setting(containerEl)
+				.setName('R2 Access Key ID')
+				.setDesc('R2 API Token Access Key ID')
+				.addText(text => text
+					.setPlaceholder('access-key-id')
+					.setValue(this.plugin.settings.r2AccessKeyId)
+					.onChange(async (value) => {
+						this.plugin.settings.r2AccessKeyId = value.trim();
+						await this.plugin.saveSettings();
+						this.plugin.debouncedInitializeStorage();
+					}));
+
+			new Setting(containerEl)
+				.setName('R2 Secret Access Key')
+				.setDesc('R2 API Token Secret Access Key')
+				.addText(text => {
+					text
+						.setPlaceholder('••••••••')
+						.setValue(this.plugin.settings.r2SecretAccessKey)
+						.onChange(async (value) => {
+							this.plugin.settings.r2SecretAccessKey = value.trim();
+							await this.plugin.saveSettings();
+							this.plugin.debouncedInitializeStorage();
+						});
+					text.inputEl.type = 'password';
+				});
+
+			new Setting(containerEl)
+				.setName('R2 Public Base URL')
+				.setDesc('Optional: Custom Domain or R2.dev URL (e.g., https://images.example.com)')
+				.addText(text => text
+					.setPlaceholder('https://images.example.com')
+					.setValue(this.plugin.settings.r2PublicBaseUrl)
+					.onChange(async (value) => {
+						this.plugin.settings.r2PublicBaseUrl = normalizeOptionalBaseUrl(value);
 						await this.plugin.saveSettings();
 						this.plugin.debouncedInitializeStorage();
 					}));
